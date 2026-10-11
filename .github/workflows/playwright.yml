@@ -1,0 +1,184 @@
+name: Tech99 Assignment
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: '0 1 * * *' # nightly regression, 08:00 Vietnam time
+  workflow_dispatch:
+    inputs:
+      grep:
+        description: 'Only run tests matching this tag/title, e.g. @smoke or @regression'
+        required: false
+        default: ''
+      run_load_test:
+        description: 'Also run the k6 load test'
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+  GREP: ${{ github.event.inputs.grep }}
+  # Override defaults from repository variables (Settings > Variables) without code changes.
+  BASE_URL: ${{ vars.BASE_URL || 'https://www.demoblaze.com' }}
+  API_URL: ${{ vars.API_URL || 'https://api.demoblaze.com' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+      - run: npm ci
+      - name: Type check
+        run: npm run lint
+
+  api:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+      - run: npm ci
+      - name: Run API tests
+        run: npx playwright test --project=api ${GREP:+--grep "$GREP"}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-results-api
+          path: allure-results
+          retention-days: 7
+
+  ui:
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chromium
+            browser: chromium
+          - project: firefox
+            browser: firefox
+          - project: webkit
+            browser: webkit
+          - project: tablet-safari
+            browser: webkit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Run UI tests (${{ matrix.project }})
+        run: npx playwright test --project=${{ matrix.project }} ${GREP:+--grep "$GREP"}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-results-${{ matrix.project }}
+          path: allure-results
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-${{ matrix.project }}
+          path: playwright-report
+          retention-days: 7
+
+  performance:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Run performance checks
+        run: npx playwright test --project=performance
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-results-performance
+          path: allure-results
+          retention-days: 7
+
+  load:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_load_test == 'true'
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: grafana/setup-k6-action@v1
+      - name: Run k6 load test
+        run: k6 run --summary-export=k6-summary.json performance/k6/login-load.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: k6-summary
+          path: k6-summary.json
+
+  report:
+    if: always()
+    needs: [api, ui, performance]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+      - run: npm ci
+      - name: Merge Allure results from all jobs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: allure-results-*
+          path: allure-results
+          merge-multiple: true
+      - name: Generate Allure report
+        run: npx allure generate allure-results --clean -o allure-report
+      - uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: allure-report
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: allure-report
+
+  deploy:
+    if: always() && github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch && needs.report.result == 'success'
+    needs: report
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

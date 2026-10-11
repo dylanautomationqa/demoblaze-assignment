@@ -1,0 +1,45 @@
+{
+  "name": "demoblaze-assignment",
+  "version": "1.0.0",
+  "description": "Playwright + TypeScript E2E, API and performance test framework for DemoBlaze (Tech99 assignment)",
+  "scripts": {
+    "lint": "tsc --noEmit",
+    "test": "playwright test",
+    "test:smoke": "playwright test --grep @smoke",
+    "test:regression": "playwright test --grep @regression",
+    "test:ui": "playwright test --project=chromium --project=firefox --project=webkit",
+    "test:chromium": "playwright test --project=chromium",
+    "test:firefox": "playwright test --project=firefox",
+    "test:webkit": "playwright test --project=webkit",
+    "test:tablet": "playwright test --project=tablet-safari",
+    "test:branded": "BRANDED_BROWSERS=true playwright test --project=chrome --project=edge",
+    "test:api": "playwright test --project=api",
+    "test:perf": "playwright test --project=performance",
+    "test:load": "k6 run performance/k6/login-load.js",
+    "test:headed": "playwright test --project=chromium --headed",
+    "test:debug": "playwright test --project=chromium --ui",
+    "report": "playwright show-report",
+    "allure:generate": "allure generate allure-results -o allure-report --clean",
+    "allure:open": "allure open allure-report",
+    "allure": "npm run allure:generate && npm run allure:open",
+    "mono:report": "monocart show-report monocart-report/index.html",
+    "ci": "npm run lint && playwright test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@eslint/js": "^9.30.0",
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^25.2.2",
+    "allure-commandline": "^2.43.0",
+    "allure-playwright": "^3.4.5",
+    "monocart-reporter": "^2.10.0",
+    "rimraf": "^6.1.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.4"
+  }
+}
